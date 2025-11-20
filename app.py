@@ -1,240 +1,368 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
+import plotly.express as px
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Central Asset Marketing Hub", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Content Command Center", layout="wide", page_icon="🚀")
 
-# --- DATABASE MANAGEMENT ---
-def init_db():
-    conn = sqlite3.connect('marketing_assets.db')
-    c = conn.cursor()
-    
-    # Assets Table
-    c.execute('''CREATE TABLE IF NOT EXISTS assets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        serial_no TEXT,
-        owner TEXT,
-        topic TEXT,
-        link TEXT,
-        summary TEXT,
-        pain_points TEXT,
-        teams_links TEXT,
-        asset_type TEXT,
-        create_date TEXT,
-        last_updated TEXT,
-        publisher TEXT,
-        function TEXT,
-        industry TEXT,
-        buying_stage TEXT,
-        service_area TEXT,
-        language TEXT,
-        gated_status TEXT,
-        status TEXT DEFAULT 'Published',
-        project_phase TEXT DEFAULT 'Completed'
-    )''')
+# --- STYLING CSS ---
+st.markdown("""
+<style>
+    .status-badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; }
+    .status-Idea { background-color: #6c757d; }
+    .status-Drafting { background-color: #007bff; }
+    .status-Review { background-color: #ffc107; color: black !important; }
+    .status-Published { background-color: #28a745; }
+    .block-container { padding-top: 2rem; }
+    .stButton>button { width: 100%; }
+</style>
+""", unsafe_allow_html=True)
 
-    # Audit Log Table
-    c.execute('''CREATE TABLE IF NOT EXISTS audit_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        asset_id INTEGER,
-        user TEXT,
-        action TEXT,
-        timestamp TEXT
-    )''')
+# --- DATABASE ENGINE ---
+class DB:
+    def __init__(self, db_name='content_hub_v2.db'):
+        self.conn = sqlite3.connect(db_name, check_same_thread=False)
+        self.create_tables()
 
-    # Comments/Tasks Table
-    c.execute('''CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        asset_id INTEGER,
-        user TEXT,
-        comment TEXT,
-        status TEXT,
-        timestamp TEXT
-    )''')
-    
-    conn.commit()
-    return conn
-
-def run_query(query, params=(), fetch=False):
-    conn = sqlite3.connect('marketing_assets.db')
-    c = conn.cursor()
-    c.execute(query, params)
-    if fetch:
-        data = c.fetchall()
-        cols = [description[0] for description in c.description]
-        conn.close()
-        return pd.DataFrame(data, columns=cols)
-    conn.commit()
-    conn.close()
-
-# --- SEED DATA (FROM YOUR CSV) ---
-# I have cleaned and structured the raw CSV data provided in your prompt.
-def seed_database_if_empty():
-    df_check = run_query("SELECT count(*) as cnt FROM assets", fetch=True)
-    if df_check['cnt'][0] == 0:
-        # This is a subset of your data for demonstration. 
-        # In a real scenario, we would parse the full CSV file provided.
-        seed_data = [
-            ("Revathy", "Episode 3 – Navigating the four phases of the AI journey", "https://www.saglobal.com/int/resources/podcasts/ai-journey-in-ae-inspections.html", "Podcast", "AE", "TOFU", "English", "Ungated"),
-            ("Revathy", "Episode 2: From data to decisions", "https://www.saglobal.com/int/resources/podcasts/ai-approach-for-service-centric-organizations.html", "Podcast", "Service-centric", "TOFU", "English", "Ungated"),
-            ("Vipin", "The real reason law firms are leaving Elite behind", "https://www.youtube.com/watch?v=zTN5mDIBVfs", "Video", "Legal", "MOFU", "English", "Ungated"),
-            ("Akshata", "Pourquoi l’intégration de votre ERP", "https://www.saglobal.com/fr-fr/insights/pourquoi-lintegration-de-votre-erp-a-votre-crm-ameliore-la-productivite.html", "Article", "IT Operations", "MOFU", "French", "Ungated"),
-            ("Akshata", "How to choose a global ERP partner", "https://www.saglobal.com/en-in/insights/how-to-choose-a-global-erp-partner-for-microsoft-dynamics.html", "Article", "Across", "MOFU", "English", "Ungated"),
-            ("Revathy", "Tackling project delays with clear goal setting", "https://www.saglobal.com/int/insights/tackling-project-delays-with-clear-goal-setting.html", "Blog", "Service Delivery", "MOFU", "English", "Ungated"),
-            ("Appu", "Olthof Homes' digital transformation", "https://www.youtube.com/watch?v=y00A2FT_JoE", "Video", "Homebuilders", "MOFU", "English", "Ungated"),
-            ("Archana", "Mastering intercompany transactions", "https://www.saglobal.com/int/insights/mastering-intercompany-transactions-with-automation-and-ai.html", "Article", "Finance", "TOFU", "English", "Ungated"),
-             ("Revathy", "Why your invoices aren’t getting paid", "https://www.saglobal.com/int/insights/why-your-invoices-arent-getting-paid-an-inside-look-at-payment-delays-in-law-firms.html", "Article", "Legal", "TOFU", "English", "Ungated"),
-            ("Revathy", "The Analytics Maturity Model", "https://www.saglobal.com/resources/all-downloads/infographics/five-stages-of-data-analysis-the-analytics-maturity-model.pdf", "Infographic", "Across", "TOFU", "English", "Ungated")
-        ]
+    def create_tables(self):
+        c = self.conn.cursor()
+        # Assets Table with rich metadata
+        c.execute('''CREATE TABLE IF NOT EXISTS assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            owner TEXT,
+            asset_type TEXT,
+            industry TEXT,
+            brief TEXT,
+            status TEXT DEFAULT 'Idea',
+            created_date DATE,
+            published_date DATE,
+            buying_stage TEXT
+        )''')
         
-        for item in seed_data:
-            run_query('''INSERT INTO assets (owner, topic, link, asset_type, industry, buying_stage, language, gated_status, create_date)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                         (*item, datetime.now().strftime("%Y-%m-%d")))
+        # Comments Table
+        c.execute('''CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id INTEGER,
+            user TEXT,
+            comment TEXT,
+            timestamp DATETIME
+        )''')
+        
+        # Attachments/Drafts Table (Storing files as BLOBs for portability)
+        c.execute('''CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id INTEGER,
+            filename TEXT,
+            file_data BLOB,
+            uploaded_by TEXT,
+            timestamp DATETIME
+        )''')
 
-# --- AUTHENTICATION (SIMPLE) ---
-def check_password():
-    """Returns `True` if the user had a correct password."""
-    def password_entered():
-        if st.session_state["username"] in ["admin", "editor", "viewer"]:
-            st.session_state["password_correct"] = True
-            st.session_state["role"] = "Admin" if st.session_state["username"] == "admin" else "Editor"
-        else:
-            st.session_state["password_correct"] = False
+        # Notifications Table
+        c.execute('''CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message TEXT,
+            is_read BOOLEAN DEFAULT 0,
+            timestamp DATETIME
+        )''')
+        self.conn.commit()
 
-    if "password_correct" not in st.session_state:
-        st.text_input("Username (Try: admin, editor)", key="username")
-        st.text_input("Password (Any password works for demo)", type="password", on_change=password_entered)
-        return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", on_change=password_entered)
-        st.error("😕 User not known")
-        return False
-    else:
-        return True
+    def query(self, query, params=()):
+        return pd.read_sql_query(query, self.conn, params=params)
 
-# --- UI MODULES ---
+    def execute(self, query, params=()):
+        c = self.conn.cursor()
+        c.execute(query, params)
+        self.conn.commit()
+        return c.lastrowid
 
-def sidebar_filters():
-    st.sidebar.header("🔍 Filter Assets")
-    df = run_query("SELECT * FROM assets", fetch=True)
-    
-    owners = st.sidebar.multiselect("Asset Owner", df['owner'].unique())
-    types = st.sidebar.multiselect("Asset Type", df['asset_type'].unique())
-    industry = st.sidebar.multiselect("Industry", df['industry'].unique())
-    stage = st.sidebar.multiselect("Buying Stage", df['buying_stage'].unique())
-    
-    return owners, types, industry, stage
+    def seed_data(self):
+        if len(self.query("SELECT * FROM assets")) == 0:
+            # Seeding a few initial items from your excel context
+            seed_items = [
+                ("AI unscripted with sa.global | Episode 3", "Revathy", "Podcast", "AE", "Discussing the four phases of AI journey.", "Published", "2025-09-26"),
+                ("Why law firms are leaving Elite behind", "Vipin", "Video", "Legal", "Explainer video on legacy migration.", "Drafting", "2025-10-01"),
+                ("Modern ERP for CFOs", "Akshata", "Whitepaper", "Finance", "Guide for modern CFOs on digital transformation.", "Review", "2025-10-05"),
+                ("Q4 Social Media Kit", "Archana", "Social Media", "Across", "Linkedin posts for Q4 campaigns.", "Idea", "2025-10-10")
+            ]
+            for item in seed_items:
+                self.execute(
+                    "INSERT INTO assets (title, owner, asset_type, industry, brief, status, created_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    item
+                )
 
-def dashboard_view(owners, types, industry, stage):
-    st.title("Central Asset Register Dashboard")
-    
-    # Metrics
-    df = run_query("SELECT * FROM assets", fetch=True)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Assets", len(df))
-    col2.metric("Published", len(df[df['status']=='Published']))
-    col3.metric("In Draft/Design", len(df[df['status']!='Published']))
-    col4.metric("Gated Assets", len(df[df['gated_status']=='Gated']))
-    
-    # Filtering Logic
-    if owners: df = df[df['owner'].isin(owners)]
-    if types: df = df[df['asset_type'].isin(types)]
-    if industry: df = df[df['industry'].isin(industry)]
-    if stage: df = df[df['buying_stage'].isin(stage)]
-    
-    st.dataframe(df, use_container_width=True)
-    
-    # Download Button
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Export Filtered Data to CSV", data=csv, file_name="asset_register.csv", mime="text/csv")
+# Initialize DB
+db = DB()
+db.seed_data()
 
-def add_edit_asset():
-    st.title("📝 Content Planner & Editor")
-    
-    with st.expander("Create New Asset Project"):
-        with st.form("new_asset_form"):
-            col1, col2 = st.columns(2)
-            owner = col1.text_input("Asset Owner", value=st.session_state.username)
-            topic = col2.text_input("Topic / Title")
-            
-            col3, col4, col5 = st.columns(3)
-            asset_type = col3.selectbox("Type", ["Article", "Video", "Podcast", "Whitepaper", "Infographic", "Event"])
-            industry = col4.selectbox("Industry", ["Legal", "Finance", "AE", "Homebuilders", "Service-centric", "Across"])
-            stage = col5.selectbox("Stage", ["TOFU", "MOFU", "BOFU"])
-            
-            summary = st.text_area("Blog Summary / Pain Points")
-            
-            submitted = st.form_submit_button("Create Project")
-            if submitted:
-                run_query('''INSERT INTO assets (owner, topic, asset_type, industry, buying_stage, summary, create_date, status)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, 'Draft')''', 
-                             (owner, topic, asset_type, industry, stage, summary, datetime.now().strftime("%Y-%m-%d")))
-                
-                # Log Audit
-                run_query("INSERT INTO audit_log (user, action, timestamp) VALUES (?, ?, ?)", 
-                          (st.session_state.username, f"Created asset: {topic}", datetime.now().strftime("%Y-%m-%d %H:%M")))
-                st.success("Project started successfully!")
+# --- UTILS ---
+def add_notification(msg):
+    db.execute("INSERT INTO notifications (message, timestamp) VALUES (?, ?)", (msg, datetime.now()))
 
-def kanban_board():
-    st.title("📋 Content Kanban Board")
-    df = run_query("SELECT * FROM assets", fetch=True)
+# --- VIEWS ---
+
+def sidebar():
+    st.sidebar.title("Content Hub")
     
-    col1, col2, col3, col4 = st.columns(4)
+    # User Profile
+    with st.sidebar.expander("👤 User Profile", expanded=True):
+        username = st.text_input("Your Name", value="MarketingUser")
+        role = st.selectbox("Role", ["Content Creator", "Editor", "Head of Marketing"])
+        st.session_state['user'] = username
+        st.session_state['role'] = role
+
+    # Notifications
+    notifs = db.query("SELECT * FROM notifications ORDER BY id DESC LIMIT 5")
+    if not notifs.empty:
+        st.sidebar.subheader("🔔 Recent Activity")
+        for _, row in notifs.iterrows():
+            st.sidebar.caption(f"{row['timestamp'][:16]}")
+            st.sidebar.info(row['message'])
+
+    return st.sidebar.radio("Go to", ["Dashboard", "Kanban Board", "Create Content", "Workspace (Collab)", "Reports"])
+
+def view_dashboard():
+    st.title("📊 Executive Dashboard")
+    
+    df = db.query("SELECT * FROM assets")
+    
+    # Top Metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Assets", len(df))
+    c2.metric("In Progress", len(df[df['status'].isin(['Drafting', 'Review'])]))
+    c3.metric("Published", len(df[df['status'] == 'Published']))
+    c4.metric("Ideas", len(df[df['status'] == 'Idea']))
+
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Drafting")
-        drafts = df[df['status'] == 'Draft']
-        for _, row in drafts.iterrows():
-            st.info(f"**{row['topic']}**\n\nOwner: {row['owner']}")
-            
+        st.subheader("Assets by Status")
+        status_counts = df['status'].value_counts().reset_index()
+        status_counts.columns = ['Status', 'Count']
+        fig = px.pie(status_counts, values='Count', names='Status', hole=0.4, color='Status',
+                     color_discrete_map={'Idea':'#6c757d', 'Drafting':'#007bff', 'Review':'#ffc107', 'Published':'#28a745'})
+        st.plotly_chart(fig, use_container_width=True)
+        
     with col2:
-        st.subheader("In Design")
-        design = df[df['status'] == 'Design']
-        for _, row in design.iterrows():
-            st.warning(f"**{row['topic']}**\n\nType: {row['asset_type']}")
+        st.subheader("Assets by Type")
+        type_counts = df['asset_type'].value_counts().reset_index()
+        type_counts.columns = ['Type', 'Count']
+        fig2 = px.bar(type_counts, x='Type', y='Count', color='Type')
+        st.plotly_chart(fig2, use_container_width=True)
 
-    with col3:
-        st.subheader("Review")
-        review = df[df['status'] == 'Review']
-        for _, row in review.iterrows():
-            st.error(f"**{row['topic']}**\n\nIndustry: {row['industry']}")
-            
-    with col4:
-        st.subheader("Published")
-        pub = df[df['status'] == 'Published']
-        # Limit showing all published to avoid scroll fatigue
-        for _, row in pub.head(5).iterrows():
-            st.success(f"**{row['topic']}**\n\n[Link]({row['link']})")
+    st.subheader("Recent Assets")
+    st.dataframe(df[['title', 'owner', 'status', 'asset_type', 'created_date']].sort_values('created_date', ascending=False).head(5), use_container_width=True)
 
-def audit_trail():
-    st.title("🕵️ Audit Trail & Version History")
-    df = run_query("SELECT * FROM audit_log ORDER BY id DESC", fetch=True)
-    st.dataframe(df, use_container_width=True)
-
-# --- MAIN APP LOGIC ---
-if __name__ == "__main__":
-    init_db()
-    seed_database_if_empty()
+def view_create():
+    st.title("✨ Create New Content Asset")
+    st.markdown("Start a new project here. Fill in the brief to kick off the workflow.")
     
-    if check_password():
-        st.sidebar.title(f"👤 {st.session_state.username}")
-        st.sidebar.info(f"Role: {st.session_state.role}")
+    with st.form("create_asset_form"):
+        c1, c2 = st.columns(2)
+        title = c1.text_input("Project Title", placeholder="e.g., Q3 Market Trends Report")
+        owner = c2.text_input("Asset Owner", value=st.session_state.get('user', ''))
         
-        menu = st.sidebar.radio("Navigation", ["Dashboard", "Plan Content", "Kanban Board", "Audit Trail"])
+        c3, c4, c5 = st.columns(3)
+        a_type = c3.selectbox("Asset Type", ["Article", "Video", "Whitepaper", "Social Media", "Podcast", "Case Study"])
+        industry = c4.selectbox("Industry/Vertical", ["Legal", "Finance", "AE", "Retail", "Cross-Industry"])
+        stage = c5.selectbox("Buying Stage", ["TOFU (Awareness)", "MOFU (Consideration)", "BOFU (Decision)"])
         
-        owners_filter, types_filter, ind_filter, stage_filter = sidebar_filters()
+        brief = st.text_area("Content Brief", placeholder="Describe the goal, target audience, and key takeaways...", height=150)
         
-        if menu == "Dashboard":
-            dashboard_view(owners_filter, types_filter, ind_filter, stage_filter)
-        elif menu == "Plan Content":
-            add_edit_asset()
-        elif menu == "Kanban Board":
-            kanban_board()
-        elif menu == "Audit Trail":
-            audit_trail()
+        submitted = st.form_submit_button("🚀 Launch Project")
+        
+        if submitted:
+            if title and owner:
+                db.execute(
+                    "INSERT INTO assets (title, owner, asset_type, industry, brief, buying_stage, created_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Idea')",
+                    (title, owner, a_type, industry, brief, stage, datetime.now().date())
+                )
+                add_notification(f"New project started: '{title}' by {owner}")
+                st.success("Asset created successfully! Head to the Kanban board to track it.")
+            else:
+                st.error("Please enter a Title and Owner.")
+
+def view_kanban():
+    st.title("📋 Content Workflow Board")
+    
+    # Filters
+    f1, f2 = st.columns(2)
+    owner_filter = f1.multiselect("Filter by Owner", db.query("SELECT DISTINCT owner FROM assets")['owner'].tolist())
+    
+    query = "SELECT * FROM assets"
+    if owner_filter:
+        # Simple filter construction
+        formatted_owners = "', '".join(owner_filter)
+        query += f" WHERE owner IN ('{formatted_owners}')"
+        
+    df = db.query(query)
+    
+    cols = st.columns(4)
+    stages = ["Idea", "Drafting", "Review", "Published"]
+    colors = ["gray", "blue", "orange", "green"]
+    
+    for i, stage in enumerate(stages):
+        with cols[i]:
+            st.markdown(f"<h3 style='border-bottom: 3px solid {colors[i]}'>{stage}</h3>", unsafe_allow_html=True)
+            stage_items = df[df['status'] == stage]
+            
+            for _, row in stage_items.iterrows():
+                with st.expander(f"**{row['asset_type']}**: {row['title']}", expanded=True):
+                    st.caption(f"👤 {row['owner']} | 📅 {row['created_date']}")
+                    st.write(row['brief'][:60] + "...")
+                    
+                    # Move actions
+                    c_move, c_open = st.columns([2, 1])
+                    with c_move:
+                        if stage != "Published":
+                            next_stage = stages[i+1]
+                            if st.button(f"→ {next_stage}", key=f"move_{row['id']}"):
+                                db.execute("UPDATE assets SET status = ? WHERE id = ?", (next_stage, row['id']))
+                                if next_stage == "Published":
+                                    db.execute("UPDATE assets SET published_date = ? WHERE id = ?", (datetime.now().date(), row['id']))
+                                    add_notification(f"🎉 Asset Published: {row['title']}")
+                                else:
+                                    add_notification(f"Asset '{row['title']}' moved to {next_stage}")
+                                st.rerun()
+                    with c_open:
+                        st.button("Details", key=f"det_{row['id']}", help="Go to Workspace to edit")
+                        # Note: In a real app, this would redirect. 
+                        # Here we rely on the user going to Workspace tab to pick the specific ID.
+
+def view_workspace():
+    st.title("🛠️ Collaboration Workspace")
+    
+    # Asset Selector
+    assets = db.query("SELECT id, title FROM assets ORDER BY id DESC")
+    asset_map = {f"{row['id']}: {row['title']}": row['id'] for _, row in assets.iterrows()}
+    
+    selected_label = st.selectbox("Select Asset to Work On", options=list(asset_map.keys()))
+    
+    if selected_label:
+        asset_id = asset_map[selected_label]
+        asset = db.query("SELECT * FROM assets WHERE id = ?", (asset_id,)).iloc[0]
+        
+        st.divider()
+        
+        # --- HEADER ---
+        c1, c2, c3 = st.columns([3, 1, 1])
+        with c1:
+            st.header(asset['title'])
+            st.markdown(f"**Brief:** {asset['brief']}")
+        with c2:
+            st.info(f"Status: **{asset['status']}**")
+        with c3:
+            st.write(f"**Owner:** {asset['owner']}")
+            st.write(f"**Type:** {asset['asset_type']}")
+
+        # --- TABS ---
+        tab_files, tab_comments, tab_settings = st.tabs(["📂 Files & Drafts", "💬 Review Comments", "⚙️ Settings"])
+        
+        # TAB 1: FILES
+        with tab_files:
+            st.subheader("Version Control")
+            
+            # Upload
+            uploaded_file = st.file_uploader("Upload Draft / Asset File")
+            if uploaded_file:
+                if st.button("Save File"):
+                    binary_data = uploaded_file.getvalue()
+                    db.execute(
+                        "INSERT INTO files (asset_id, filename, file_data, uploaded_by, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        (asset_id, uploaded_file.name, binary_data, st.session_state.get('user', 'User'), datetime.now())
+                    )
+                    st.success("File uploaded successfully!")
+                    st.rerun()
+            
+            # List Files
+            files = db.query("SELECT * FROM files WHERE asset_id = ? ORDER BY id DESC", (asset_id,))
+            if not files.empty:
+                for _, f in files.iterrows():
+                    col_f1, col_f2 = st.columns([4, 1])
+                    with col_f1:
+                        st.write(f"📄 **{f['filename']}** (Uploaded by {f['uploaded_by']} on {f['timestamp'][:16]})")
+                    with col_f2:
+                        st.download_button("Download", f['file_data'], file_name=f['filename'], key=f"dl_{f['id']}")
+            else:
+                st.info("No drafts uploaded yet.")
+
+        # TAB 2: COMMENTS
+        with tab_comments:
+            st.subheader("Team Discussion")
+            
+            # Input
+            new_comment = st.text_input("Add a review comment")
+            if st.button("Post Comment"):
+                if new_comment:
+                    db.execute("INSERT INTO comments (asset_id, user, comment, timestamp) VALUES (?, ?, ?, ?)",
+                               (asset_id, st.session_state.get('user', 'User'), new_comment, datetime.now()))
+                    st.rerun()
+            
+            # List
+            comments = db.query("SELECT * FROM comments WHERE asset_id = ? ORDER BY id DESC", (asset_id,))
+            for _, c in comments.iterrows():
+                st.markdown(f"""
+                <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                    <small><b>{c['user']}</b> - {c['timestamp'][:16]}</small><br>
+                    {c['comment']}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # TAB 3: SETTINGS (Delete/Edit)
+        with tab_settings:
+            st.warning("Danger Zone")
+            if st.button("Delete Project"):
+                db.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+                db.execute("DELETE FROM comments WHERE asset_id = ?", (asset_id,))
+                db.execute("DELETE FROM files WHERE asset_id = ?", (asset_id,))
+                st.error("Project deleted.")
+                st.rerun()
+
+def view_reports():
+    st.title("📈 Advanced Reporting")
+    
+    df = db.query("SELECT * FROM assets")
+    df['created_date'] = pd.to_datetime(df['created_date'])
+    df['Month'] = df['created_date'].dt.strftime('%Y-%m')
+    
+    # Report 1: Creation Velocity
+    st.subheader("1. Monthly Asset Creation")
+    monthly_counts = df.groupby('Month').size().reset_index(name='Count')
+    fig1 = px.bar(monthly_counts, x='Month', y='Count', title="Assets Created per Month")
+    st.plotly_chart(fig1, use_container_width=True)
+    
+    # Report 2: Type by Status
+    st.subheader("2. Content Mix Analysis")
+    fig2 = px.sunburst(df, path=['industry', 'asset_type'], title="Distribution by Industry & Type")
+    st.plotly_chart(fig2, use_container_width=True)
+    
+    # Report 3: Raw Data Export
+    st.subheader("3. Export Data")
+    st.write("Download the full register for Excel analysis.")
+    st.dataframe(df)
+    st.download_button(
+        "📥 Download CSV",
+        df.to_csv(index=False).encode('utf-8'),
+        "marketing_assets_report.csv",
+        "text/csv"
+    )
+
+# --- MAIN ROUTER ---
+if __name__ == "__main__":
+    page = sidebar()
+    
+    if page == "Dashboard":
+        view_dashboard()
+    elif page == "Create Content":
+        view_create()
+    elif page == "Kanban Board":
+        view_kanban()
+    elif page == "Workspace (Collab)":
+        view_workspace()
+    elif page == "Reports":
+        view_reports()
+```
