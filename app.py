@@ -365,4 +365,3 @@ if __name__ == "__main__":
         view_workspace()
     elif page == "Reports":
         view_reports()
-```
