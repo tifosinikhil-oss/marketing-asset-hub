@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import type { Adapter, AdapterUser } from "next-auth/adapters";
 import { prisma } from "@/lib/db";
 import { UserRole } from "@prisma/client";
 
@@ -17,8 +18,48 @@ declare module "next-auth" {
   }
 }
 
+async function ensureOrgIdForNewUser(email: string): Promise<string> {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  const slug = domain ? domain.replace(/[^a-z0-9]+/g, "-").slice(0, 40) : "default";
+
+  const existing = await prisma.organization.findFirst({
+    where: { OR: [{ slug }, ...(slug !== "default" ? [{ slug: "default" }] : [])] },
+    orderBy: { createdAt: "asc" },
+  });
+  if (existing) return existing.id;
+
+  const created = await prisma.organization.create({
+    data: { name: domain || "Default Organization", slug: slug || "default" },
+  });
+  return created.id;
+}
+
+const baseAdapter = PrismaAdapter(prisma);
+const adapter: Adapter = {
+  ...baseAdapter,
+  async createUser(data) {
+    const orgId = await ensureOrgIdForNewUser(data.email);
+    const user = await prisma.user.create({
+      data: {
+        email: data.email,
+        name: data.name,
+        image: data.image,
+        orgId,
+        role: "REQUESTER",
+      },
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name ?? null,
+      image: user.image ?? null,
+      emailVerified: data.emailVerified ?? null,
+    } satisfies AdapterUser;
+  },
+};
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  adapter,
   session: { strategy: "database" },
   providers: [
     MicrosoftEntraID({

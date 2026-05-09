@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LayoutDashboard, Inbox, Calendar, FolderOpen, MessageSquare, BarChart3, BookOpen, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NotificationCenter } from "@/components/notification-center";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -13,11 +14,22 @@ const NAV = [
   { href: "/settings/profile", label: "Settings", icon: Settings },
 ];
 
+type Notif = {
+  id: string;
+  title: string;
+  body: string | null;
+  requestId: string | null;
+  readAt: Date | null;
+  createdAt: Date;
+};
+
 export function AppShell({
   user,
+  notifications,
   children,
 }: {
   user: { name?: string | null; email: string; image?: string | null };
+  notifications: Notif[];
   children: React.ReactNode;
 }) {
   return (
@@ -61,7 +73,8 @@ export function AppShell({
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 border-b border-[var(--color-border)] flex items-center px-6 gap-4">
           <div className="text-sm text-[var(--color-muted-foreground)]">⌘K to search</div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <NotificationCenter items={notifications} />
             <Link
               href="/requests/new"
               className="inline-flex items-center gap-2 bg-[var(--color-primary)] text-[var(--color-primary-foreground)] px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90"

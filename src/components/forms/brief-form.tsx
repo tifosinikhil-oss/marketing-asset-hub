@@ -80,9 +80,10 @@ export function BriefForm({ brands }: BriefFormProps) {
         successMetrics: (d.successMetrics ?? []).join("\n"),
         channels: d.channels?.length ? d.channels : v.channels,
       }));
-      if (d.openQuestions?.length) {
-        setAiHint(`Open questions to confirm: ${d.openQuestions.join(" · ")}`);
-      }
+      const hints: string[] = [];
+      if (d.deadlineHint) hints.push(`Deadline hint: ${d.deadlineHint}`);
+      if (d.openQuestions?.length) hints.push(`Open questions: ${d.openQuestions.join(" · ")}`);
+      setAiHint(hints.length ? hints.join(" · ") : null);
     });
   }
 

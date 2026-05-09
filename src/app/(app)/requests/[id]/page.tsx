@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { FileText } from "lucide-react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { CONTENT_TYPE_LABELS, NEXT_STATUSES, STATUS_LABELS } from "@/lib/validators/brief";
 import { formatDate, relativeTime } from "@/lib/utils";
 import { transitionStatus, addComment } from "@/server/actions/requests";
+import { deleteFile } from "@/server/actions/files";
 import { can } from "@/lib/rbac";
+import { FileUploader } from "@/components/file-uploader";
 
 export default async function RequestPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,10 +26,21 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
       assignee: true,
       comments: { include: { author: true }, orderBy: { createdAt: "asc" } },
       activityEvents: { include: { actor: true }, orderBy: { createdAt: "desc" }, take: 30 },
-      tasks: { orderBy: { order: "asc" } },
+      tasks: { include: { assignee: true }, orderBy: { order: "asc" } },
+      files: { include: { uploader: true }, orderBy: { createdAt: "desc" } },
     },
   });
   if (!request) notFound();
+
+  const topLevelTasks = request.tasks.filter((t) => !t.parentTaskId);
+  const subtaskByParent = new Map<string, typeof request.tasks>();
+  for (const t of request.tasks) {
+    if (t.parentTaskId) {
+      const list = subtaskByParent.get(t.parentTaskId) ?? [];
+      list.push(t);
+      subtaskByParent.set(t.parentTaskId, list);
+    }
+  }
 
   const brief = (request.brief ?? {}) as {
     targetAudience?: string;
@@ -107,6 +121,95 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
                     ))}
                   </div>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Tasks</CardTitle>
+                <span className="text-xs text-[var(--color-muted-foreground)]">
+                  {request.tasks.filter((t) => t.status === "DONE").length}/{request.tasks.length} done
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {topLevelTasks.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted-foreground)]">
+                  AI is generating a work breakdown… refresh in a moment.
+                </p>
+              ) : (
+                <ol className="space-y-3">
+                  {topLevelTasks.map((t) => {
+                    const subs = subtaskByParent.get(t.id) ?? [];
+                    return (
+                      <li key={t.id}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-sm">{t.title}</div>
+                            {t.description && (
+                              <div className="text-xs text-[var(--color-muted-foreground)] mt-0.5">{t.description}</div>
+                            )}
+                          </div>
+                          <Badge variant="outline" className="text-xs shrink-0">{t.status}</Badge>
+                        </div>
+                        {subs.length > 0 && (
+                          <ul className="mt-2 ml-4 space-y-1.5 border-l border-[var(--color-border)] pl-3">
+                            {subs.map((s) => (
+                              <li key={s.id} className="text-xs flex items-start justify-between gap-2">
+                                <span>{s.title}</span>
+                                <Badge variant="outline" className="shrink-0">{s.status}</Badge>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Files</CardTitle>
+                {can(session.user.role, "file:upload") && (
+                  <FileUploader requestId={request.id} kind="REFERENCE" label="Add file" />
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {request.files.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted-foreground)]">No files yet.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-border)]">
+                  {request.files.map((f) => (
+                    <li key={f.id} className="py-2 flex items-center gap-3">
+                      <FileText className="size-4 text-[var(--color-muted-foreground)] shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{f.filename}</div>
+                        <div className="text-xs text-[var(--color-muted-foreground)]">
+                          {f.kind.toLowerCase()} · {(f.size / 1024).toFixed(0)} KB · uploaded by{" "}
+                          {f.uploader.name ?? f.uploader.email} · {relativeTime(f.createdAt)}
+                        </div>
+                      </div>
+                      {can(session.user.role, "file:delete") && (
+                        <form action={deleteFile}>
+                          <input type="hidden" name="fileId" value={f.id} />
+                          <button
+                            type="submit"
+                            className="text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]"
+                          >
+                            Remove
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </CardContent>
           </Card>
