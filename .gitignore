@@ -1,0 +1,25 @@
+node_modules/
+.next/
+.turbo/
+out/
+build/
+dist/
+
+.env
+.env.local
+.env.*.local
+
+*.log
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Prisma
+prisma/migrations/dev.db*
+
+# misc
+.tsbuildinfo
+next-env.d.ts
+tsconfig.tsbuildinfo

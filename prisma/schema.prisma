@@ -1,0 +1,803 @@
+// Marketing Asset Hub — multi-tenant, multi-brand data model.
+// See /root/.claude/plans/i-want-to-create-silly-lighthouse.md for the rationale.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector, pg_trgm]
+}
+
+// ─── Org & identity ─────────────────────────────────────────────────────
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  logoUrl       String?
+  primaryColor  String?
+  plan          String   @default("standard")
+  createdAt     DateTime @default(now())
+
+  users         User[]
+  brands        Brand[]
+  teams         Team[]
+  costCenters   CostCenter[]
+  campaigns     Campaign[]
+  requests      Request[]
+  taskTemplates TaskTemplate[]
+  assets        Asset[]
+  collections   Collection[]
+  customFields  CustomField[]
+  workflowStages WorkflowStage[]
+  roles         Role[]
+  auditLogs     AuditLog[]
+  aiUsage       AiUsageEvent[]
+  integrations  Integration[]
+  webhooks      Webhook[]
+  wikiPages     WikiPage[]
+  contentChunks ContentChunk[]
+  notifications Notification[]
+  ragConvos     RagConversation[]
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  PRODUCER     // content / design / web dev producer
+  REVIEWER
+  REQUESTER
+  FREELANCER
+  VIEWER
+}
+
+model User {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  email                 String   @unique
+  name                  String?
+  image                 String?
+  entraOid              String?  @unique
+  role                  UserRole @default(REQUESTER)
+  skills                String[] @default([])
+  capacityHoursPerWeek  Int?
+  timezone              String?
+  oooFrom               DateTime?
+  oooUntil              DateTime?
+  isFreelancer          Boolean  @default(false)
+  hourlyRate            Decimal?
+  createdAt             DateTime @default(now())
+
+  org           Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  profile       Profile?
+  accounts      Account[]
+  sessions      Session[]
+  teamMembers   TeamMember[]
+  brandMembers  BrandMember[]
+  requestsRequested Request[]    @relation("requester")
+  requestsAssigned  Request[]    @relation("assignee")
+  approvals     RequestApproval[]
+  tasks         Task[]
+  drafts        Draft[]
+  uploads       File[]
+  comments      Comment[]
+  reactions     Reaction[]
+  activityEvents ActivityEvent[]
+  notifications Notification[]
+  shareLinks    ExternalShareLink[]
+  collections   Collection[]
+  ragConvos     RagConversation[]
+  auditLogs     AuditLog[]
+  aiUsage       AiUsageEvent[]
+  timeEntries   TimeEntry[]
+  invoices      Invoice[]
+  templatesOwned TaskTemplate[]
+  wikiPagesEdited WikiPage[]
+
+  @@index([orgId])
+}
+
+model Profile {
+  id                String  @id @default(cuid())
+  userId            String  @unique
+  bio               String?
+  title             String?
+  slackId           String?
+  teamsId           String?
+  notificationPrefs Json    @default("{}")
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── NextAuth standard tables ──────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?  @db.Text
+  access_token      String?  @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?  @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Org structure ─────────────────────────────────────────────────────
+
+model Team {
+  id      String       @id @default(cuid())
+  orgId   String
+  name    String
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members TeamMember[]
+
+  @@index([orgId])
+}
+
+model TeamMember {
+  userId String
+  teamId String
+  role   String  @default("member")
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  @@id([userId, teamId])
+}
+
+model Brand {
+  id              String   @id @default(cuid())
+  orgId           String
+  name            String
+  slug            String
+  guidelinesUrl   String?
+  voiceCorpusReady Boolean @default(false)
+  senderMailbox   String?
+  primaryColor    String?
+  logoUrl         String?
+  createdAt       DateTime @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members   BrandMember[]
+  campaigns Campaign[]
+  requests  Request[]
+  templates TaskTemplate[]
+  assets    Asset[]
+  collections Collection[]
+  customFields CustomField[]
+  workflowStages WorkflowStage[]
+  contentChunks ContentChunk[]
+  aiUsage   AiUsageEvent[]
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+}
+
+model BrandMember {
+  userId  String
+  brandId String
+  role    String  @default("contributor")
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brand   Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  @@id([userId, brandId])
+}
+
+model CostCenter {
+  id    String  @id @default(cuid())
+  orgId String
+  name  String
+  code  String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requests Request[]
+
+  @@unique([orgId, code])
+}
+
+model Campaign {
+  id        String   @id @default(cuid())
+  orgId     String
+  brandId   String?
+  name      String
+  startDate DateTime?
+  endDate   DateTime?
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand     Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  requests  Request[]
+
+  @@index([orgId])
+  @@index([brandId])
+}
+
+// ─── Requests & workflow ───────────────────────────────────────────────
+
+enum ContentType {
+  BLOG
+  WHITEPAPER
+  EBOOK
+  CASE_STUDY
+  VIDEO
+  PODCAST
+  WEBINAR
+  SOCIAL_POST
+  SOCIAL_CAMPAIGN
+  EMAIL
+  NEWSLETTER
+  LANDING_PAGE
+  WEBSITE_PAGE
+  AD_CREATIVE
+  INFOGRAPHIC
+  PRESENTATION
+  EVENT
+  OTHER
+}
+
+enum RequestStatus {
+  SUBMITTED
+  TRIAGE
+  ACCEPTED
+  RESEARCH
+  DRAFTING
+  REVIEW
+  DESIGN
+  WEB_DEV
+  QA
+  PUBLISHED
+  ARCHIVED
+  REJECTED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Request {
+  id              String         @id @default(cuid())
+  orgId           String
+  brandId         String?
+  title           String
+  requesterId     String
+  assigneeId      String?
+  costCenterId    String?
+  campaignId      String?
+  parentRequestId String?
+  contentType     ContentType
+  status          RequestStatus  @default(SUBMITTED)
+  priority        Priority       @default(MEDIUM)
+  deadline        DateTime?
+  channels        String[]       @default([])
+  brief           Json
+  finalUrls       Json?
+  performance     Json?
+  satisfactionScore Int?
+  recurringRuleId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  org         Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand       Brand?            @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  requester   User              @relation("requester", fields: [requesterId], references: [id], onDelete: Restrict)
+  assignee    User?             @relation("assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  costCenter  CostCenter?       @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  campaign    Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  parent      Request?          @relation("RequestParent", fields: [parentRequestId], references: [id], onDelete: SetNull)
+  children    Request[]         @relation("RequestParent")
+  approvals   RequestApproval[]
+  tasks       Task[]
+  drafts      Draft[]
+  files       File[]
+  comments    Comment[]
+  activityEvents ActivityEvent[]
+  notifications  Notification[]
+  shareLinks  ExternalShareLink[]
+  asset       Asset?
+
+  @@index([orgId, status])
+  @@index([orgId, brandId])
+  @@index([requesterId])
+  @@index([assigneeId])
+}
+
+model RequestApproval {
+  id         String        @id @default(cuid())
+  requestId  String
+  approverId String
+  decision   String        // PENDING | APPROVED | REJECTED | CHANGES_REQUESTED
+  comment    String?
+  createdAt  DateTime      @default(now())
+  request    Request       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver   User          @relation(fields: [approverId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  DONE
+}
+
+model Task {
+  id              String      @id @default(cuid())
+  orgId           String
+  requestId       String
+  parentTaskId    String?
+  title           String
+  description     String?
+  assigneeId      String?
+  status          TaskStatus  @default(TODO)
+  order           Int         @default(0)
+  dueDate         DateTime?
+  dependsOnTaskId String?
+  templateTaskId  String?
+  hoursEstimate   Decimal?
+  hoursLogged     Decimal     @default(0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  request    Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  parent     Task?     @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  children   Task[]    @relation("TaskParent")
+  dependsOn  Task?     @relation("TaskDependsOn", fields: [dependsOnTaskId], references: [id], onDelete: SetNull)
+  blocks     Task[]    @relation("TaskDependsOn")
+  assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  template   TemplateTask? @relation(fields: [templateTaskId], references: [id], onDelete: SetNull)
+  comments   Comment[]
+  timeEntries TimeEntry[]
+
+  @@index([requestId])
+  @@index([assigneeId])
+}
+
+model TaskTemplate {
+  id          String         @id @default(cuid())
+  orgId       String
+  brandId     String?
+  name        String
+  contentType ContentType
+  ownerId     String
+  isShared    Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand  Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  owner  User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tasks  TemplateTask[]
+
+  @@index([orgId, contentType])
+}
+
+model TemplateTask {
+  id          String  @id @default(cuid())
+  templateId  String
+  parentId    String?
+  title       String
+  defaultRole String?
+  order       Int     @default(0)
+  description String?
+  template    TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent      TemplateTask? @relation("TemplateTaskParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children    TemplateTask[] @relation("TemplateTaskParent")
+  tasks       Task[]
+}
+
+model TimeEntry {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  minutes   Int
+  note      String?
+  billable  Boolean  @default(false)
+  loggedAt  DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId, loggedAt])
+}
+
+model Invoice {
+  id           String   @id @default(cuid())
+  orgId        String
+  freelancerId String
+  periodStart  DateTime
+  periodEnd    DateTime
+  totalAmount  Decimal
+  fileR2Key    String?
+  status       String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | PAID
+  createdAt    DateTime @default(now())
+  freelancer   User     @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([freelancerId])
+}
+
+// ─── Content & files ───────────────────────────────────────────────────
+
+model Draft {
+  id                String   @id @default(cuid())
+  orgId             String
+  requestId         String
+  body              Json     // Tiptap doc
+  version           Int      @default(1)
+  authorId          String
+  complianceReport  Json?
+  createdAt         DateTime @default(now())
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  @@index([requestId])
+}
+
+enum FileKind {
+  REFERENCE
+  RESEARCH
+  DRAFT
+  DESIGN
+  FINAL
+}
+
+model File {
+  id            String   @id @default(cuid())
+  orgId         String
+  requestId     String?
+  uploaderId    String
+  filename      String
+  r2Key         String   @unique
+  mimeType      String
+  size          Int
+  kind          FileKind @default(REFERENCE)
+  version       Int      @default(1)
+  extractedText String?  @db.Text
+  rights        Json?
+  createdAt     DateTime @default(now())
+
+  request    Request?     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploader   User         @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  annotations Annotation[]
+  comments   Comment[]
+
+  @@index([requestId])
+}
+
+model Annotation {
+  id         String   @id @default(cuid())
+  fileId     String
+  authorId   String
+  x          Float?
+  y          Float?
+  page       Int?
+  timestamp  Float?
+  body       String
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+  file       File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+}
+
+// ─── Comments, activity, notifications ─────────────────────────────────
+
+model Comment {
+  id              String   @id @default(cuid())
+  orgId           String
+  requestId       String?
+  taskId          String?
+  draftId         String?
+  fileId          String?
+  parentCommentId String?
+  authorId        String
+  body            String   @db.Text
+  voiceNoteR2Key  String?
+  mentions        String[] @default([])
+  createdAt       DateTime @default(now())
+
+  request    Request?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  draft      Draft?    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  file       File?     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  parent     Comment?  @relation("CommentParent", fields: [parentCommentId], references: [id], onDelete: SetNull)
+  children   Comment[] @relation("CommentParent")
+  author     User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reactions  Reaction[]
+
+  @@index([requestId])
+  @@index([taskId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  commentId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId, emoji])
+}
+
+model ActivityEvent {
+  id        String   @id @default(cuid())
+  orgId     String
+  requestId String
+  actorId   String
+  type      String   // STATUS_CHANGED | TASK_DONE | FILE_ADDED | COMMENT | ASSIGNED | APPROVED | ...
+  payload   Json
+  createdAt DateTime @default(now())
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   User    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SLACK
+  TEAMS
+  PUSH
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  orgId      String
+  userId     String
+  requestId  String?
+  kind       String
+  title      String
+  body       String?
+  channel    NotificationChannel @default(IN_APP)
+  readAt     DateTime?
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request Request?     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model ExternalShareLink {
+  id              String   @id @default(cuid())
+  orgId           String
+  requestId       String
+  tokenHash       String   @unique
+  scope           String   @default("READ") // READ | COMMENT
+  watermarkLabel  String?
+  expiresAt       DateTime
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}
+
+// ─── Repository ────────────────────────────────────────────────────────
+
+model Asset {
+  id          String   @id @default(cuid())
+  orgId       String
+  brandId     String?
+  requestId   String   @unique
+  title       String
+  description String?  @db.Text
+  tags        String[] @default([])
+  collections String[] @default([])
+  publishedAt DateTime @default(now())
+  performance Json?
+  seo         Json?
+  healthScore Int?
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand   Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  request Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, brandId])
+  @@index([orgId, publishedAt])
+}
+
+model Collection {
+  id        String   @id @default(cuid())
+  orgId     String
+  brandId   String?
+  name      String
+  ownerId   String
+  isPublic  Boolean  @default(false)
+  ruleQuery Json?    // for smart collections
+  createdAt DateTime @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  owner User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model ContentChunk {
+  id         String                       @id @default(cuid())
+  orgId      String
+  brandId    String?
+  sourceType String                       // ASSET | FILE | DRAFT | BRAND_VOICE | WIKI
+  sourceId   String
+  content    String                       @db.Text
+  tokenCount Int
+  embedding  Unsupported("vector(1024)")?
+  metadata   Json
+  createdAt  DateTime                     @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, sourceType])
+  @@index([sourceType, sourceId])
+}
+
+model RagConversation {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  title     String
+  createdAt DateTime @default(now())
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages RagMessage[]
+
+  @@index([userId])
+}
+
+model RagMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // user | assistant | system
+  content        String   @db.Text
+  citations      Json?
+  createdAt      DateTime @default(now())
+  conversation   RagConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// ─── Customization & governance ────────────────────────────────────────
+
+model CustomField {
+  id          String       @id @default(cuid())
+  orgId       String
+  brandId     String?
+  contentType ContentType?
+  key         String
+  label       String
+  type        String       // text | textarea | number | select | multiselect | date | url
+  required    Boolean      @default(false)
+  options     Json?        // for select/multiselect
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, brandId, contentType, key])
+}
+
+model WorkflowStage {
+  id           String       @id @default(cuid())
+  orgId        String
+  brandId      String?
+  contentType  ContentType?
+  key          String
+  label        String
+  order        Int
+  allowedRoles String[]     @default([])
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, brandId, contentType, key])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  permissions Json
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  actorId     String?
+  action      String
+  subjectType String
+  subjectId   String
+  payload     Json?
+  createdAt   DateTime @default(now())
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
+
+model AiUsageEvent {
+  id           String   @id @default(cuid())
+  orgId        String
+  brandId      String?
+  userId       String?
+  feature      String
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Decimal
+  createdAt    DateTime @default(now())
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brand Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  user  User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
+
+model Integration {
+  id        String   @id @default(cuid())
+  orgId     String
+  kind      String   // SLACK | TEAMS | GA4 | MIXPANEL | SHAREPOINT | FIGMA | LOOM ...
+  config    Json     // encrypted at app layer
+  enabledAt DateTime?
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, kind])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  orgId     String
+  url       String
+  secret    String
+  events    String[] @default([])
+  enabledAt DateTime?
+  createdAt DateTime @default(now())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model WikiPage {
+  id        String   @id @default(cuid())
+  orgId     String
+  slug      String
+  title     String
+  body      Json     // Tiptap doc
+  tags      String[] @default([])
+  updatedById String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, slug])
+}
