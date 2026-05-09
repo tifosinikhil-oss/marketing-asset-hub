@@ -48,18 +48,31 @@ src/components/ui/                  shadcn primitives (button, input, card, badg
 prisma/seed.ts                      demo org + brand + sample request
 ```
 
-## Local development
+## Quick demo (one command)
+
+If you have Docker:
+
+```bash
+docker compose up
+# wait ~30s for postgres + the app to boot, then visit http://localhost:3000
+# pick "Continue (dev)" with admin@demo.local — no Entra needed.
+```
+
+This boots Postgres + pgvector, runs the schema migration, seeds a demo org / brand / sample request, and starts the Next.js dev server with the dev-mode credentials provider so you can sign in without provisioning Microsoft Entra.
+
+## Local development (without Docker)
 
 ```bash
 cp .env.example .env
 # Fill in DATABASE_URL (Neon free tier works) and AUTH_SECRET at minimum.
+# For local-only sign-in without Entra, set DEV_AUTH=true and DEV_AUTH_EMAIL.
 npm install
-npx prisma migrate dev --name init
+npx prisma db push          # (or `prisma migrate dev --name init` once you want a migration history)
 npm run db:seed
 npm run dev
 ```
 
-The first time you sign in via Microsoft Entra, you'll need an Entra app registration with a `Mail.Send` permission scoped via `New-ApplicationAccessPolicy` to your shared mailbox. See the plan at `/root/.claude/plans/i-want-to-create-silly-lighthouse.md` for the full IT setup.
+Production sign-in: configure Microsoft Entra ID and `Mail.Send` (Application permission, scoped via `New-ApplicationAccessPolicy` to your shared mailbox). See the plan at `/root/.claude/plans/i-want-to-create-silly-lighthouse.md` for the full IT setup.
 
 ## Phase status
 
