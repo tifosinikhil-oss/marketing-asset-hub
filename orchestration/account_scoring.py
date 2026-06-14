@@ -140,16 +140,13 @@ class AccountScorer:
         if scored_df.empty:
             return scored_df
 
-        # Score each account
-        scores = []
-        for _, row in scored_df.iterrows():
+        # Score each account and update the dataframe
+        for idx, (_, row) in enumerate(scored_df.iterrows()):
             score_data = self.score_account(row)
-            scores.append(score_data)
+            for key, value in score_data.items():
+                scored_df.at[idx, key] = value
 
-        scores_df = pd.DataFrame(scores)
-        result_df = pd.concat([scored_df, scores_df], axis=1)
-
-        return result_df
+        return scored_df
 
     def save_scores(self, scored_df: pd.DataFrame):
         """Save scores back to database"""
