@@ -123,7 +123,7 @@ def sidebar():
             st.sidebar.caption(f"{row['timestamp'][:16]}")
             st.sidebar.info(row['message'])
 
-    return st.sidebar.radio("Go to", ["Dashboard", "Kanban Board", "Create Content", "Workspace (Collab)", "Reports"])
+    return st.sidebar.radio("Go to", ["Dashboard", "Kanban Board", "Create Content", "Workspace (Collab)", "Reports", "🔥 Hot Accounts"])
 
 def view_dashboard():
     st.title("📊 Executive Dashboard")
@@ -354,7 +354,7 @@ def view_reports():
 # --- MAIN ROUTER ---
 if __name__ == "__main__":
     page = sidebar()
-    
+
     if page == "Dashboard":
         view_dashboard()
     elif page == "Create Content":
@@ -365,3 +365,7 @@ if __name__ == "__main__":
         view_workspace()
     elif page == "Reports":
         view_reports()
+    elif page == "🔥 Hot Accounts":
+        # Import hot accounts page dynamically to avoid circular imports
+        from pages.hot_accounts_dashboard import main as hot_accounts_main
+        hot_accounts_main()
