@@ -12,16 +12,15 @@ from orchestration.db_utils import init_account_intelligence_tables, get_upload_
 from orchestration.account_matching import AccountMatcher
 from orchestration.account_scoring import AccountScorer
 
-
-# Page config
-st.set_page_config(page_title="Hot Accounts", layout="wide", page_icon="🔥")
-
 # Initialize session state
 if 'db_path' not in st.session_state:
     st.session_state.db_path = 'content_hub_v2.db'
 
 if 'matched_refresh' not in st.session_state:
     st.session_state.matched_refresh = False
+
+if 'hot_accounts_page' not in st.session_state:
+    st.session_state.hot_accounts_page = 'dashboard'
 
 
 def get_conn():
@@ -195,7 +194,7 @@ def save_mal_data(conn: sqlite3.Connection, df: pd.DataFrame, uploaded_filename:
 
 def page_upload():
     """Upload & Sync page"""
-    st.title("📤 Upload & Sync Data")
+    st.subheader("Upload Excel Data")
     st.markdown("Upload Excel files for 6sense intent data, CE accounts, and MAL. Data is stored locally.")
 
     conn = get_conn()
@@ -283,7 +282,7 @@ def page_upload():
 
 def page_dashboard():
     """Hot Accounts Dashboard page"""
-    st.title("🔥 Hot Accounts Dashboard")
+    st.subheader("Account Priority Rankings")
     st.markdown("View and filter high-priority accounts by region and intent.")
 
     conn = get_conn()
@@ -395,18 +394,18 @@ def page_dashboard():
         )
 
 
-# Main page routing
 def main():
-    st.sidebar.title("🔥 Account Intelligence")
+    """Main entry point for hot accounts dashboard"""
+    st.title("🔥 Hot Accounts Intelligence")
+    st.markdown("Account prioritization based on intent signals, CRM data, and marketing lists")
 
-    page = st.sidebar.radio(
-        "Go to",
-        ["Dashboard", "Upload & Sync"]
-    )
+    # Tabs for navigation
+    tab_dashboard, tab_upload = st.tabs(["📊 Dashboard", "📤 Upload Data"])
 
-    if page == "Dashboard":
+    with tab_dashboard:
         page_dashboard()
-    elif page == "Upload & Sync":
+
+    with tab_upload:
         page_upload()
 
 
